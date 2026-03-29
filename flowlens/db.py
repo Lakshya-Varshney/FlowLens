@@ -550,3 +550,15 @@ def save_simulation(
              current_score, projected_score, hours_recovered),
         )
         return cur.lastrowid
+
+
+def has_any_data() -> bool:
+    """Returns True if at least one developer-day row with a flow score exists."""
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM developer_day_features WHERE flow_score IS NOT NULL LIMIT 1"
+            ).fetchone()
+        return row is not None
+    except Exception:
+        return False

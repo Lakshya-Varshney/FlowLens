@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowLens — Developer Flow Intelligence</title>
+  <style>
+    /* ═══════════════════════════════════════════════════
+       DESIGN TOKENS
+    ═══════════════════════════════════════════════════ */
+    :root {
+      --bg:       #07080b;
+      --surface:  #0d0f16;
+      --surface2: #12151e;
+      --border:   #1a1e2e;
+      --accent:   #00e5ff;
+      --accent2:  #7c3aed;
+      --accent3:  #f59e0b;
+      --accent4:  #10b981;
+      --danger:   #ef4444;
+      --text:     #e8eaf0;
+      --muted:    #6b7280;
+      --font:     'Courier New', 'Consolas', 'Cascadia Code', monospace;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       BASE
+    ═══════════════════════════════════════════════════ */
+    * { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       BACKGROUND — grid + radial glow
+    ═══════════════════════════════════════════════════ */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: -30vh;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      height: 600px;
+      background: radial-gradient(ellipse at 50% 20%, rgba(0,229,255,0.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Scan line */
+    .scan-line {
+      position: fixed;
+      left: 0; width: 100%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 7s linear infinite;
+      opacity: 0.5;
+      z-index: 1;
+      pointer-events: none;
+    }
+    @keyframes scan {
+      0%   { top: -2px; }
+      100% { top: 100vh; }
+    }
+
+    /* ═══════════════════════════════════════════════════
+       LAYOUT WRAPPER
+    ═══════════════════════════════════════════════════ */
+    .page {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       NAV
+    ═══════════════════════════════════════════════════ */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 48px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(7,8,11,0.8);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .nav-logo {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    .nav-logo span { color: var(--accent); }
+
+    .nav-pills {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 2px;
+      font-weight: 600;
+    }
+
+    .pill-cyan   { background: rgba(0,229,255,0.08);  color: var(--accent);  border: 1px solid rgba(0,229,255,0.2); }
+    .pill-purple { background: rgba(124,58,237,0.08); color: #a78bfa;        border: 1px solid rgba(124,58,237,0.2); }
+    .pill-green  { background: rgba(16,185,129,0.08); color: var(--accent4); border: 1px solid rgba(16,185,129,0.2); }
+
+    /* ═══════════════════════════════════════════════════
+       HERO
+    ═══════════════════════════════════════════════════ */
+    .hero {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 24px 60px;
+      text-align: center;
+    }
+
+    /* Track label */
+    .track-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid rgba(0,229,255,0.25);
+      padding: 6px 16px;
+      border-radius: 2px;
+      margin-bottom: 32px;
+      animation: fadeDown 0.6s ease both;
+    }
+
+    .track-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulseDot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* Main headline */
+    .headline {
+      font-size: clamp(48px, 8vw, 96px);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      color: #fff;
+      margin-bottom: 8px;
+      animation: fadeDown 0.7s 0.1s ease both;
+    }
+
+    .headline .hl {
+      color: var(--accent);
+      position: relative;
+      display: inline-block;
+    }
+
+    /* Glitch underline */
+    .headline .hl::after {
+      content: '';
+      position: absolute;
+      bottom: -4px;
+      left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 1px;
+      animation: glitchLine 4s ease-in-out infinite;
+    }
+
+    @keyframes glitchLine {
+      0%, 90%, 100% { opacity: 1; transform: scaleX(1); }
+      92%           { opacity: 0.3; transform: scaleX(0.8) translateX(4px); }
+      94%           { opacity: 1; transform: scaleX(1); }
+      96%           { opacity: 0.5; transform: scaleX(0.95) translateX(-2px); }
+    }
+
+    /* Subheadline */
+    .sub-headline {
+      font-size: clamp(13px, 2vw, 16px);
+      color: var(--muted);
+      max-width: 580px;
+      line-height: 1.7;
+      margin-top: 24px;
+      margin-bottom: 48px;
+      animation: fadeDown 0.7s 0.2s ease both;
+    }
+
+    .sub-headline strong { color: var(--text); font-weight: 600; }
+
+    /* ═══════════════════════════════════════════════════
+       REPO INPUT CARD
+    ═══════════════════════════════════════════════════ */
+    .input-card {
+      width: 100%;
+      max-width: 620px;
+      animation: fadeDown 0.7s 0.3s ease both;
+    }
+
+    .input-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 6px 6px 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .input-box::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0,229,255,0.3), transparent);
+    }
+
+    .input-box:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,229,255,0.08), 0 0 24px rgba(0,229,255,0.06);
+    }
+
+    .input-prefix {
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .repo-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      outline: none;
+      padding: 10px 0;
+      min-width: 0;
+    }
+
+    .repo-input::placeholder { color: #374151; }
+
+    .repo-input::-webkit-input-placeholder { color: #374151; }
+
+    .scan-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 20px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+
+    .scan-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+    .scan-btn:active { transform: translateY(0); }
+    .scan-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* Input hint row */
+    .input-hints {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .hint-item {
+      font-size: 10px;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .hint-item.ok { color: var(--accent4); }
+
+    /* Error message */
+    .input-error {
+      font-size: 11px;
+      color: var(--danger);
+      margin-top: 8px;
+      display: none;
+      padding-left: 4px;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       STATS ROW (below input)
+    ═══════════════════════════════════════════════════ */
+    .stats-row {
+      display: flex;
+      gap: 40px;
+      margin-top: 52px;
+      animation: fadeDown 0.7s 0.4s ease both;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-num {
+      font-size: 28px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .stat-num .unit { font-size: 14px; color: var(--muted); }
+
+    .stat-name {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .stat-divider {
+      width: 1px;
+      background: var(--border);
+      align-self: stretch;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       FEATURE PILLS ROW
+    ═══════════════════════════════════════════════════ */
+    .features-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 52px;
+      animation: fadeDown 0.7s 0.5s ease both;
+    }
+
+    .feature-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 7px 14px;
+    }
+
+    .feature-pill .icon { font-size: 13px; }
+
+    /* ═══════════════════════════════════════════════════
+       SCANNING OVERLAY — shown after submit
+    ═══════════════════════════════════════════════════ */
+    #scan-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 100;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    #scan-overlay.active { display: flex; }
+
+    /* Terminal window */
+    .terminal {
+      width: 100%;
+      max-width: 640px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .t-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+    .t-dot.red    { background: #ef4444; }
+    .t-dot.amber  { background: #f59e0b; }
+    .t-dot.green  { background: #10b981; }
+
+    .terminal-title {
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 8px;
+      letter-spacing: 0.05em;
+    }
+
+    .terminal-body {
+      padding: 20px 24px;
+      font-size: 12px;
+      line-height: 1.9;
+      min-height: 240px;
+    }
+
+    /* Log lines */
+    .log-line {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+
+    .log-line.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .log-time {
+      color: #374151;
+      flex-shrink: 0;
+      font-size: 10px;
+      margin-top: 1px;
+      width: 64px;
+    }
+
+    .log-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      padding: 1px 6px;
+      border-radius: 2px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .log-badge.info  { background: rgba(0,229,255,0.1);  color: var(--accent);  border: 1px solid rgba(0,229,255,0.2); }
+    .log-badge.ok    { background: rgba(16,185,129,0.1); color: var(--accent4); border: 1px solid rgba(16,185,129,0.2); }
+    .log-badge.warn  { background: rgba(245,158,11,0.1); color: var(--accent3); border: 1px solid rgba(245,158,11,0.2); }
+    .log-badge.ml    { background: rgba(124,58,237,0.1); color: #a78bfa;        border: 1px solid rgba(124,58,237,0.2); }
+
+    .log-text { color: var(--text); }
+    .log-text .dim  { color: var(--muted); }
+    .log-text .hl   { color: var(--accent); }
+    .log-text .grn  { color: var(--accent4); }
+    .log-text .amb  { color: var(--accent3); }
+    .log-text .purp { color: #a78bfa; }
+
+    /* Cursor blink */
+    .cursor {
+      display: inline-block;
+      width: 8px; height: 14px;
+      background: var(--accent);
+      animation: blink 1s step-end infinite;
+      vertical-align: text-bottom;
+      margin-left: 4px;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* Progress bar */
+    .progress-wrap {
+      margin-top: 16px;
+      padding: 0 24px 20px;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .progress-track {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.5s ease;
+    }
+
+    /* Scanning label above terminal */
+    .scan-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .scan-header h2 {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+    }
+
+    .scan-header p {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .scan-header .repo-name {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* Success banner */
+    #success-banner {
+      display: none;
+      margin-top: 20px;
+      background: rgba(16,185,129,0.08);
+      border: 1px solid rgba(16,185,129,0.3);
+      border-radius: 4px;
+      padding: 16px 24px;
+      text-align: center;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    #success-banner h3 {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--accent4);
+      margin-bottom: 4px;
+    }
+
+    #success-banner p {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .redirect-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      background: var(--accent4);
+      color: #000;
+      border: none;
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      padding: 11px 24px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }
+
+    .redirect-btn:hover { opacity: 0.88; }
+
+    /* Error banner */
+    #error-banner {
+      display: none;
+      margin-top: 20px;
+      background: rgba(239,68,68,0.07);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 4px;
+      padding: 16px 24px;
+      text-align: center;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    #error-banner h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--danger);
+      margin-bottom: 4px;
+    }
+
+    #error-banner p {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .retry-btn {
+      background: var(--danger);
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 18px;
+      cursor: pointer;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       FOOTER
+    ═══════════════════════════════════════════════════ */
+    footer {
+      padding: 20px 48px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #374151;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       ANIMATIONS
+    ═══════════════════════════════════════════════════ */
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ═══════════════════════════════════════════════════
+       RESPONSIVE
+    ═══════════════════════════════════════════════════ */
+    @media (max-width: 600px) {
+      nav { padding: 16px 20px; }
+      .hero { padding: 48px 20px 40px; }
+      .stats-row { gap: 24px; }
+      footer { flex-direction: column; gap: 8px; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Scan line -->
+  <div class="scan-line"></div>
+
+  <!-- ═══════════════════════════════════
+       MAIN PAGE
+  ═══════════════════════════════════ -->
+  <div class="page" id="main-page">
+
+    <!-- Nav -->
+    <nav>
+      <div class="nav-logo">Flow<span>Lens</span></div>
+      <div class="nav-pills">
+        <span class="pill pill-cyan">Track F · Flow Scan</span>
+        <span class="pill pill-purple">× Track B</span>
+        <span class="pill pill-green">MIT License</span>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+
+      <!-- Track label -->
+      <div class="track-label">
+        <span class="track-dot"></span>
+        DX-Ray Hackathon 2026 · Developer Flow Intelligence
+      </div>
+
+      <!-- Headline -->
+      <h1 class="headline">
+        X-ray your<br/>
+        developer <span class="hl">flow</span>
+      </h1>
+
+      <!-- Sub -->
+      <p class="sub-headline">
+        Point FlowLens at any Git repository. In seconds it will
+        <strong>diagnose hidden productivity disruptions</strong>,
+        explain the root cause with AI, and
+        <strong>prescribe specific workflow fixes</strong> — all running
+        locally. No data leaves your machine.
+      </p>
+
+      <!-- Input card -->
+      <div class="input-card">
+        <div class="input-box" id="input-box">
+          <span class="input-prefix">$&nbsp;run&nbsp;--repo</span>
+          <input
+            type="text"
+            id="repo-url"
+            class="repo-input"
+            placeholder="https://github.com/facebook/react"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+          <button class="scan-btn" id="scan-btn" onclick="startScan()">
+            ⚡ Scan Repo
+          </button>
+        </div>
+        <div class="input-error" id="input-error"></div>
+
+        <!-- Hints -->
+        <div class="input-hints">
+          <span class="hint-item ok">✓ Works with any public GitHub repo</span>
+          <span class="hint-item ok">✓ Private repos with GITHUB_TOKEN</span>
+          <span class="hint-item">· Local paths also supported</span>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="stat-num">14<span class="unit"> features</span></div>
+          <div class="stat-name">ML features extracted</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-num">F<span class="unit">+B</span></div>
+          <div class="stat-name">Cross-track coverage</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-num">+13<span class="unit"> pts</span></div>
+          <div class="stat-name">Bonus point eligible</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-num">1<span class="unit"> cmd</span></div>
+          <div class="stat-name">One-command setup</div>
+        </div>
+      </div>
+
+      <!-- Feature pills -->
+      <div class="features-row">
+        <div class="feature-pill"><span class="icon">🔬</span> Isolation Forest anomaly detection</div>
+        <div class="feature-pill"><span class="icon">⚡</span> SHAP feature explanations</div>
+        <div class="feature-pill"><span class="icon">🤖</span> AI-synthesised recommendations</div>
+        <div class="feature-pill"><span class="icon">📊</span> Before / After simulator</div>
+        <div class="feature-pill"><span class="icon">🔒</span> 100% local — no telemetry</div>
+      </div>
+
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <span>FlowLens · DX-Ray Hackathon 2026 · Track F + Cross-Track B</span>
+      <span>MIT License · All data processed locally · No telemetry</span>
+    </footer>
+
+  </div><!-- /#main-page -->
+
+
+  <!-- ═══════════════════════════════════
+       SCANNING OVERLAY
+  ═══════════════════════════════════ -->
+  <div id="scan-overlay">
+
+    <div class="scan-header">
+      <h2>Scanning repository</h2>
+      <p>Analysing <span class="repo-name" id="scan-repo-label">…</span></p>
+    </div>
+
+    <!-- Terminal window -->
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="t-dot red"></div>
+        <div class="t-dot amber"></div>
+        <div class="t-dot green"></div>
+        <span class="terminal-title">flowlens — ingestion pipeline</span>
+      </div>
+      <div class="terminal-body" id="terminal-body">
+        <!-- Log lines injected by JS -->
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span id="progress-label-text">Initialising…</span>
+          <span id="progress-pct">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Success -->
+    <div id="success-banner">
+      <h3>✓ Analysis complete</h3>
+      <p id="success-sub">Repository scanned and model trained successfully.</p>
+      <a href="/dashboard" class="redirect-btn" id="open-dashboard-btn">
+        Open Dashboard →
+      </a>
+    </div>
+
+    <!-- Error -->
+    <div id="error-banner">
+      <h3>Ingestion failed</h3>
+      <p id="error-msg">Something went wrong. Please check the repo URL and try again.</p>
+      <button class="retry-btn" onclick="resetToHome()">← Try Again</button>
+    </div>
+
+  </div><!-- /#scan-overlay -->
+
+
+  <!-- ═══════════════════════════════════
+       JAVASCRIPT
+  ═══════════════════════════════════ -->
+  <script>
+  'use strict';
+
+  /* ── Config ── */
+  const API_BASE      = '';          // same origin
+  const POLL_INTERVAL = 1200;        // ms between status polls
+  const DASHBOARD_URL = '/dashboard';
+
+  /* ── State ── */
+  let pollTimer   = null;
+  let loggedSteps = new Set();
+
+  /* ── Step definitions — shown as log lines during ingestion ──
+     Each step maps to a `step` string returned by /api/ingestion-status.
+     The frontend shows them in order regardless of exact timing.        */
+  const STEPS = [
+    {
+      step:    'cloning',
+      pct:     8,
+      badge:   'info',
+      text:    () => `<span class="dim">git clone --depth=full</span> <span class="hl">${getRepoShort()}</span>`,
+    },
+    {
+      step:    'ingesting',
+      pct:     22,
+      badge:   'info',
+      text:    () => `Ingesting commit history <span class="dim">· GitPython parser active</span>`,
+    },
+    {
+      step:    'features',
+      pct:     45,
+      badge:   'info',
+      text:    () => `Engineering <span class="amb">14 developer-flow features</span> per day`,
+    },
+    {
+      step:    'scaling',
+      pct:     58,
+      badge:   'info',
+      text:    () => `StandardScaler fit <span class="dim">· zero mean · unit variance</span>`,
+    },
+    {
+      step:    'training',
+      pct:     72,
+      badge:   'ml',
+      text:    () => `Training <span class="purp">IsolationForest</span> <span class="dim">n_estimators=200 contamination=0.1</span>`,
+    },
+    {
+      step:    'shap',
+      pct:     84,
+      badge:   'ml',
+      text:    () => `Computing <span class="purp">SHAP</span> values <span class="dim">· TreeExplainer · top-5 features per anomaly</span>`,
+    },
+    {
+      step:    'insights',
+      pct:     93,
+      badge:   'ml',
+      text:    () => `Generating rule-based recommendations <span class="dim">· LLM synthesis queued</span>`,
+    },
+    {
+      step:    'saving',
+      pct:     98,
+      badge:   'ok',
+      text:    () => `Writing results to <span class="grn">flowlens.db</span> <span class="dim">· SQLite · 4 tables</span>`,
+    },
+    {
+      step:    'ready',
+      pct:     100,
+      badge:   'ok',
+      text:    () => `<span class="grn">✓ FlowLens ready</span> <span class="dim">· Dashboard available at</span> <span class="hl">localhost:5000/dashboard</span>`,
+    },
+  ];
+
+  /* ── Repo short name for display ── */
+  function getRepoShort() {
+    const val = document.getElementById('repo-url').value.trim();
+    try {
+      const url = new URL(val);
+      return url.pathname.replace(/^\//, '').replace(/\.git$/, '');
+    } catch {
+      return val.split('/').slice(-2).join('/') || val;
+    }
+  }
+
+  /* ── Timestamp string ── */
+  function nowTime() {
+    return new Date().toLocaleTimeString('en', { hour12: false });
+  }
+
+  /* ── Validate repo URL / path ── */
+  function validateRepo(val) {
+    if (!val) return 'Please enter a GitHub URL or local path.';
+    const isGithub = /^https?:\/\/(www\.)?github\.com\/.+\/.+/.test(val);
+    const isLocal  = val.startsWith('/') || val.startsWith('./') || val.startsWith('~');
+    if (!isGithub && !isLocal) {
+      return 'Must be a GitHub URL (https://github.com/owner/repo) or a local path.';
+    }
+    return null;
+  }
+
+  /* ── Append a log line to the terminal ── */
+  function appendLog(badge, textHTML, timestamp) {
+    const body = document.getElementById('terminal-body');
+
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `
+      <span class="log-time">${timestamp || nowTime()}</span>
+      <span class="log-badge ${badge}">${badge.toUpperCase()}</span>
+      <span class="log-text">${textHTML}</span>
+    `;
+    body.appendChild(line);
+
+    // Trigger animation on next frame
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => line.classList.add('visible'));
+    });
+
+    // Auto-scroll terminal body
+    body.scrollTop = body.scrollHeight;
+  }
+
+  /* ── Update progress bar ── */
+  function setProgress(pct, label) {
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
+    if (label) document.getElementById('progress-label-text').textContent = label;
+  }
+
+  /* ── START SCAN — called by button ── */
+  async function startScan() {
+    const input  = document.getElementById('repo-url');
+    const errEl  = document.getElementById('input-error');
+    const repoUrl = input.value.trim();
+
+    // Validate
+    const validationError = validateRepo(repoUrl);
+    if (validationError) {
+      errEl.textContent = validationError;
+      errEl.style.display = 'block';
+      document.getElementById('input-box').style.borderColor = 'var(--danger)';
+      return;
+    }
+
+    errEl.style.display = 'none';
+    document.getElementById('input-box').style.borderColor = '';
+
+    // Disable button
+    const btn = document.getElementById('scan-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Starting…';
+
+    // Show overlay
+    document.getElementById('scan-repo-label').textContent = getRepoShort();
+    showOverlay();
+
+    // Fire POST /api/ingest
+    try {
+      const res = await fetch(`${API_BASE}/api/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: repoUrl }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        showError(json.error || `HTTP ${res.status} — could not start ingestion.`);
+        return;
+      }
+
+      // Start polling
+      appendLog('info', `Ingestion job started <span class="dim">· job_id: <span class="hl">${json.data?.job_id || 'pending'}</span></span>`);
+      startPolling();
+
+    } catch (err) {
+      showError(`Could not reach the FlowLens server. Is run.py running? (${err.message})`);
+    }
+  }
+
+  /* ── Show scanning overlay ── */
+  function showOverlay() {
+    document.getElementById('scan-overlay').classList.add('active');
+    document.getElementById('terminal-body').innerHTML = '';
+    document.getElementById('success-banner').style.display = 'none';
+    document.getElementById('error-banner').style.display = 'none';
+    loggedSteps.clear();
+    setProgress(0, 'Starting ingestion…');
+
+    appendLog('info', `FlowLens ingestion pipeline <span class="dim">initialising…</span>`);
+  }
+
+  /* ── Poll /api/ingestion-status ── */
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollStatus, POLL_INTERVAL);
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  async function pollStatus() {
+    try {
+      const res  = await fetch(`${API_BASE}/api/ingestion-status`);
+      const json = await res.json();
+
+      if (!json.ok) {
+        stopPolling();
+        showError(json.error || 'Ingestion failed.');
+        return;
+      }
+
+      const d = json.data;
+      handleStatusUpdate(d);
+
+    } catch (err) {
+      // Network blip — keep polling, don't abort
+      console.warn('Poll error:', err.message);
+    }
+  }
+
+  /* ── Handle a status payload from the server ── */
+  function handleStatusUpdate(d) {
+    const step     = d.step || '';       // e.g. "training"
+    const pct      = d.percent || 0;     // 0–100 integer
+    const message  = d.message || '';    // free-form server message
+    const status   = d.status;           // "in_progress" | "complete" | "error"
+    const ts       = d.timestamp || nowTime();
+
+    // Show any server-provided log message that we haven't shown yet
+    if (message && !loggedSteps.has('msg:' + message)) {
+      loggedSteps.add('msg:' + message);
+      appendLog('info', escapeHTML(message), ts);
+    }
+
+    // Walk through our ordered STEPS and show any that match or precede current pct
+    STEPS.forEach(s => {
+      if (!loggedSteps.has(s.step) && pct >= s.pct - 5) {
+        loggedSteps.add(s.step);
+        appendLog(s.badge, s.text(), ts);
+        setProgress(s.pct, stepLabel(s.step));
+      }
+    });
+
+    // Override with server-reported pct if higher
+    const fill = document.getElementById('progress-fill');
+    const serverPct = parseInt(fill.style.width) || 0;
+    if (pct > serverPct) setProgress(pct, stepLabel(step));
+
+    // Terminal states
+    if (status === 'complete') {
+      stopPolling();
+      setProgress(100, 'Analysis complete');
+
+      // Make sure all steps shown
+      STEPS.forEach(s => {
+        if (!loggedSteps.has(s.step)) {
+          loggedSteps.add(s.step);
+          appendLog(s.badge, s.text(), ts);
+        }
+      });
+
+      // Show commit / developer counts if provided
+      if (d.commits_ingested || d.developer_count) {
+        const info = [
+          d.commits_ingested && `<span class="hl">${d.commits_ingested.toLocaleString()}</span> commits`,
+          d.developer_count  && `<span class="hl">${d.developer_count}</span> developers`,
+          d.developer_days   && `<span class="hl">${d.developer_days.toLocaleString()}</span> developer-days`,
+        ].filter(Boolean).join(' · ');
+        appendLog('ok', `Indexed ${info}`, ts);
+      }
+
+      showSuccess(d);
+
+    } else if (status === 'error') {
+      stopPolling();
+      showError(d.error || 'Ingestion failed. Check the server logs.');
+    }
+  }
+
+  /* ── Show success banner ── */
+  function showSuccess(d) {
+    const banner = document.getElementById('success-banner');
+    const sub    = document.getElementById('success-sub');
+
+    const parts = [];
+    if (d.commits_ingested) parts.push(`${d.commits_ingested.toLocaleString()} commits`);
+    if (d.developer_count)  parts.push(`${d.developer_count} developers`);
+    if (d.developer_days)   parts.push(`${d.developer_days.toLocaleString()} developer-days analysed`);
+
+    sub.textContent = parts.length
+      ? parts.join(' · ') + ' · Model trained and ready.'
+      : 'Repository analysed. Model trained and ready.';
+
+    banner.style.display = 'block';
+
+    // Auto-redirect after 2.5 seconds
+    setTimeout(() => {
+      window.location.href = DASHBOARD_URL;
+    }, 2500);
+  }
+
+  /* ── Show error banner ── */
+  function showError(msg) {
+    appendLog('warn', `<span style="color:var(--danger)">Error:</span> ${escapeHTML(msg)}`);
+    setProgress(0, 'Ingestion failed');
+
+    const banner = document.getElementById('error-banner');
+    document.getElementById('error-msg').textContent = msg;
+    banner.style.display = 'block';
+  }
+
+  /* ── Reset back to home ── */
+  function resetToHome() {
+    stopPolling();
+    document.getElementById('scan-overlay').classList.remove('active');
+    document.getElementById('scan-btn').disabled = false;
+    document.getElementById('scan-btn').textContent = '⚡ Scan Repo';
+  }
+
+  /* ── Step → human label ── */
+  function stepLabel(step) {
+    const map = {
+      cloning:   'Cloning repository…',
+      ingesting: 'Ingesting commits…',
+      features:  'Engineering features…',
+      scaling:   'Preprocessing data…',
+      training:  'Training ML model…',
+      shap:      'Computing SHAP values…',
+      insights:  'Generating insights…',
+      saving:    'Saving to database…',
+      ready:     'Analysis complete',
+    };
+    return map[step] || step || 'Working…';
+  }
+
+  /* ── HTML escape for server messages ── */
+  function escapeHTML(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  /* ── Enter key on input ── */
+  document.getElementById('repo-url').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startScan();
+  });
+
+  /* ── If status is already "complete" on load (re-run scenario), ──
+     show a "Go to dashboard" link immediately.                       */
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const res  = await fetch(`${API_BASE}/api/status`);
+      const json = await res.json();
+      if (json.ok && json.data?.status === 'ready') {
+        const hint = document.querySelector('.input-hints');
+        if (hint) {
+          hint.insertAdjacentHTML('beforeend', `
+            <span class="hint-item" style="margin-left:auto;">
+              <a href="${DASHBOARD_URL}"
+                 style="color:var(--accent);text-decoration:none;font-weight:700;">
+                ▶ Dashboard already loaded — open →
+              </a>
+            </span>
+          `);
+        }
+      }
+    } catch { /* server not up yet — fine */ }
+  });
+  </script>
+
+</body>
+</html>

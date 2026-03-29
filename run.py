@@ -32,7 +32,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv()  # Read .env file if present
-
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
@@ -316,7 +315,7 @@ def main() -> None:
             webbrowser.open(f"http://localhost:{port}")
         threading.Thread(target=_open_browser, daemon=True).start()
 
-    logger.info("🚀 FlowLens ready at http://localhost:%d", port)
+    logger.info("🚀 FlowLens ready → http://localhost:%d  (Dashboard: http://localhost:%d/dashboard)", port, port)
     app.run(
         host=cfg.get("server", {}).get("host", "0.0.0.0"),
         port=port,
