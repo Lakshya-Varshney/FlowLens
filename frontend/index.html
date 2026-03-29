@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowLens — Developer Flow Intelligence</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="bg-[#08090c] text-[#e8eaf0] min-h-screen font-mono">
+
+  <!-- Scan line overlay -->
+  <div class="scan-line" aria-hidden="true"></div>
+
+  <!-- ═══════════════════════════════════ -->
+  <!-- APP SHELL                           -->
+  <!-- ═══════════════════════════════════ -->
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- ─── SIDEBAR ─── -->
+    <aside id="sidebar" class="sidebar w-64 flex-shrink-0 flex flex-col border-r border-[#1e2130] overflow-y-auto">
+
+      <!-- Logo -->
+      <div class="px-6 py-5 border-b border-[#1e2130]">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-[10px] tracking-widest uppercase text-[#00e5ff] border border-[#00e5ff]/30 px-2 py-0.5 rounded-sm">FlowLens</span>
+        </div>
+        <p class="text-[11px] text-[#6b7280] italic mt-1">Developer flow X-ray</p>
+        <div class="mt-3 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-[#10b981] pulse-dot"></span>
+          <span class="text-[10px] text-[#10b981]">All data processed locally</span>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="px-5 py-5 space-y-5 flex-1">
+
+        <!-- Repo selector -->
+        <div>
+          <label class="block text-[10px] tracking-widest uppercase text-[#6b7280] mb-2">Repository</label>
+          <select id="repo-select" class="filter-select w-full">
+            <option value="">Loading repos...</option>
+          </select>
+        </div>
+
+        <!-- Developer selector -->
+        <div>
+          <label class="block text-[10px] tracking-widest uppercase text-[#6b7280] mb-2">Developer</label>
+          <select id="dev-select" class="filter-select w-full">
+            <option value="">All Developers</option>
+          </select>
+        </div>
+
+        <!-- Date range -->
+        <div>
+          <label class="block text-[10px] tracking-widest uppercase text-[#6b7280] mb-2">Date Range</label>
+          <div class="space-y-2">
+            <input type="date" id="date-since" class="filter-input w-full" />
+            <input type="date" id="date-until" class="filter-input w-full" />
+          </div>
+        </div>
+
+        <!-- Re-analyse button -->
+        <button id="btn-analyse" class="w-full btn-primary">
+          <span class="mr-2">⚡</span> Re-analyse
+        </button>
+
+        <!-- Divider -->
+        <div class="border-t border-[#1e2130]"></div>
+
+        <!-- Judging criteria summary -->
+        <div>
+          <p class="text-[10px] tracking-widest uppercase text-[#6b7280] mb-3">Judging Criteria</p>
+          <div class="space-y-2">
+            <div class="criteria-bar-row"><span>Problem Diagnosis</span><span class="text-[#00e5ff]">25%</span></div>
+            <div class="criteria-bar-row"><span>Solution Impact</span><span class="text-[#a78bfa]">25%</span></div>
+            <div class="criteria-bar-row"><span>Tech Execution</span><span class="text-[#f59e0b]">20%</span></div>
+            <div class="criteria-bar-row"><span>UX</span><span class="text-[#10b981]">15%</span></div>
+            <div class="criteria-bar-row"><span>Demo</span><span class="text-[#ef4444]">15%</span></div>
+          </div>
+        </div>
+
+        <!-- Open source badges -->
+        <div class="mt-auto pt-4 border-t border-[#1e2130]">
+          <div class="flex gap-2 flex-wrap">
+            <span class="badge badge-cyan">MIT License</span>
+            <span class="badge badge-green">Open Source</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ─── MAIN CONTENT ─── -->
+    <main class="flex-1 overflow-y-auto">
+
+      <!-- Top header bar -->
+      <header class="sticky top-0 z-10 bg-[#08090c]/90 backdrop-blur border-b border-[#1e2130] px-8 py-4 flex items-center justify-between">
+        <div>
+          <h1 class="text-lg font-bold text-white tracking-tight">Developer Flow Dashboard</h1>
+          <p id="header-subtitle" class="text-[11px] text-[#6b7280]">Loading repository data...</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="topbar-meta" class="text-[11px] text-[#6b7280] hidden"></span>
+          <span id="status-badge" class="status-badge status-loading">● Connecting</span>
+          <button id="btn-simulator" class="btn-outline text-[12px] px-4 py-1.5">
+            ⚡ Simulator
+          </button>
+        </div>
+      </header>
+
+      <!-- Content area -->
+      <div class="px-8 py-6 space-y-6">
+
+        <!-- ── SUMMARY STATS ROW ── -->
+        <section id="summary-row" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="stat-card">
+            <div class="stat-label">Team Flow Score</div>
+            <div class="stat-value" id="stat-flow-score">—</div>
+            <div class="stat-sub" id="stat-flow-sub">current period avg</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Anomalous Days</div>
+            <div class="stat-value text-[#ef4444]" id="stat-anomaly-count">—</div>
+            <div class="stat-sub">days flagged</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Most Disrupted</div>
+            <div class="stat-value-sm" id="stat-worst-dev">—</div>
+            <div class="stat-sub" id="stat-worst-score">worst score</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Top Recommendation</div>
+            <div class="stat-rec" id="stat-top-rec">Analysing patterns...</div>
+          </div>
+        </section>
+
+        <!-- ── HEATMAP SECTION ── -->
+        <section class="content-card">
+          <div class="content-card-header">
+            <div class="flex items-center gap-3">
+              <span class="section-badge">Flow X-Ray</span>
+              <h2 class="section-title">Flow Score Heatmap</h2>
+            </div>
+            <div class="flex items-center gap-4 text-[11px] text-[#6b7280]">
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-[#1a0a0a]"></span>No data</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-[#7f1d1d]"></span>Low</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-[#f97316]"></span>Mid</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-[#10b981]"></span>High</span>
+            </div>
+          </div>
+          <div id="heatmap-container" class="heatmap-wrapper">
+            <div id="heatmap-loading" class="flex items-center justify-center h-32 text-[#6b7280] text-sm">
+              <div class="loading-spinner mr-3"></div> Loading flow data...
+            </div>
+            <div id="heatmap-grid" class="hidden"></div>
+          </div>
+          <!-- Tooltip -->
+          <div id="heatmap-tooltip" class="heatmap-tooltip hidden"></div>
+        </section>
+
+        <!-- ── TREND CHART SECTION ── -->
+        <section class="content-card">
+          <div class="content-card-header">
+            <div class="flex items-center gap-3">
+              <span class="section-badge section-badge-purple">Trend</span>
+              <h2 class="section-title">Team Flow Score — 7-Day Rolling Average</h2>
+            </div>
+          </div>
+          <div class="relative h-56">
+            <canvas id="trend-chart"></canvas>
+            <div id="trend-loading" class="absolute inset-0 flex items-center justify-center text-[#6b7280] text-sm">
+              <div class="loading-spinner mr-3"></div> Loading trend data...
+            </div>
+          </div>
+        </section>
+
+        <!-- ── BOTTOM TWO-COL LAYOUT ── -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+          <!-- Developer Breakdown -->
+          <section class="content-card">
+            <div class="content-card-header">
+              <div class="flex items-center gap-3">
+                <span class="section-badge section-badge-amber">Developers</span>
+                <h2 class="section-title">Individual Flow Scores</h2>
+              </div>
+            </div>
+            <div id="dev-breakdown" class="space-y-3 max-h-80 overflow-y-auto pr-1">
+              <div class="text-[#6b7280] text-sm text-center py-8">Select a developer or analyse repository</div>
+            </div>
+          </section>
+
+          <!-- Anomaly Log -->
+          <section class="content-card">
+            <div class="content-card-header">
+              <div class="flex items-center gap-3">
+                <span class="section-badge section-badge-red">Alerts</span>
+                <h2 class="section-title">Anomaly Log</h2>
+              </div>
+            </div>
+            <div id="anomaly-log" class="space-y-2 max-h-80 overflow-y-auto pr-1">
+              <div class="text-[#6b7280] text-sm text-center py-8">No anomalies loaded yet</div>
+            </div>
+          </section>
+        </div>
+
+      </div><!-- /content -->
+    </main>
+
+    <!-- ─── SHAP SIDE PANEL ─── -->
+    <aside id="shap-panel" class="shap-panel w-0 border-l border-[#1e2130] overflow-hidden flex-shrink-0 transition-all duration-300 ease-in-out">
+      <div class="w-96 h-full flex flex-col overflow-y-auto">
+
+        <!-- Panel header — always visible -->
+        <div class="px-5 py-4 border-b border-[#1e2130] flex items-center justify-between sticky top-0 bg-[#0f1117] z-10">
+          <div>
+            <h3 class="text-white font-bold text-sm">Flow X-Ray Diagnosis</h3>
+            <p id="shap-subtitle" class="text-[11px] text-[#6b7280] mt-0.5">Select a heatmap cell</p>
+          </div>
+          <button id="shap-close" class="text-[#6b7280] hover:text-white transition text-lg leading-none">✕</button>
+        </div>
+
+        <!-- Dynamic content area (populated by shap_panel.js) -->
+        <div id="shap-content" class="px-5 py-4 flex-1 space-y-4">
+          <div class="text-[#6b7280] text-sm text-center py-12">
+            <div class="text-3xl mb-3">🔬</div>
+            Click any heatmap cell to<br/>reveal the flow X-ray
+          </div>
+        </div>
+
+        <!-- Simulator button — static so disabled state is reliable.
+             Disabled until shap_panel.js confirms a successful SHAP load.
+             shap_panel.js sets data-dev / data-date on this button.        -->
+        <div class="px-5 pb-5 pt-2 border-t border-[#1e2130]">
+          <button
+            id="open-sim-btn"
+            disabled
+            class="btn-primary w-full opacity-40 cursor-not-allowed"
+            style="font-size:12px;"
+            onclick="SimulatorModule.openFromShap()"
+          >
+            ⚡ Open Before/After Simulator →
+          </button>
+          <p id="open-sim-hint" class="text-[10px] text-[#6b7280] text-center mt-2">
+            Load a cell's X-ray to unlock the simulator
+          </p>
+        </div>
+
+      </div>
+    </aside>
+  </div>
+
+  <!-- ═══════════════════════════════════ -->
+  <!-- SIMULATOR MODAL                     -->
+  <!-- ═══════════════════════════════════ -->
+  <div id="simulator-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h2 class="text-white font-bold text-base">Before / After Simulator</h2>
+          <p class="text-[11px] text-[#6b7280] mt-0.5">Adjust workflow parameters to project flow score improvement</p>
+        </div>
+        <button id="simulator-close" class="text-[#6b7280] hover:text-white transition text-lg">✕</button>
+      </div>
+
+      <!-- Context bar -->
+      <div id="sim-context" class="sim-context-bar hidden">
+        Simulating for: <span id="sim-context-text" class="text-[#00e5ff]"></span>
+      </div>
+
+      <!-- Score display -->
+      <div class="flex items-center justify-center gap-8 py-6">
+        <div class="text-center">
+          <div class="text-[11px] text-[#6b7280] tracking-widest uppercase mb-2">Current Score</div>
+          <div id="sim-current-score" class="text-5xl font-bold text-[#ef4444]">—</div>
+          <div class="text-[11px] mt-1" id="sim-current-label" style="color:#ef4444;">⚠ Disrupted</div>
+        </div>
+        <div class="text-[#6b7280] text-2xl">→</div>
+        <div class="text-center">
+          <div class="text-[11px] text-[#6b7280] tracking-widest uppercase mb-2">Projected Score</div>
+          <div id="sim-projected-score" class="text-5xl font-bold text-[#10b981]">—</div>
+          <div class="text-[11px] mt-1" id="sim-projected-label" style="color:#10b981;">—</div>
+        </div>
+      </div>
+
+      <!-- Data availability warning — shown by simulator.js when PR/CI data was not ingested -->
+      <div id="data-warning" class="hidden mx-1 mb-2 px-4 py-3 rounded-sm text-[11px] leading-relaxed"
+           style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;">
+        ⚠️ <strong>Some sliders have limited effect</strong> — PR and CI data was not available
+        during ingestion (blobless clone). Only focus block and gap-variance changes are active.
+        Set a <code style="background:#161822;padding:1px 5px;border-radius:2px;">GITHUB_TOKEN</code>
+        and re-run to unlock all sliders.
+      </div>
+
+      <!-- Sliders -->
+      <div class="space-y-5 px-1">
+        <div class="slider-group">
+          <div class="flex justify-between mb-2">
+            <label class="slider-label">PR Review Time Target</label>
+            <span class="slider-value" id="val-pr-time">4h</span>
+          </div>
+          <input type="range" id="slider-pr-time" min="1" max="48" value="4" step="1" class="sim-slider" />
+          <div class="slider-bounds"><span>1h</span><span>48h</span></div>
+        </div>
+
+        <div class="slider-group">
+          <div class="flex justify-between mb-2">
+            <label class="slider-label">Max PR Size (lines)</label>
+            <span class="slider-value" id="val-pr-size">200</span>
+          </div>
+          <input type="range" id="slider-pr-size" min="50" max="1000" value="200" step="50" class="sim-slider" />
+          <div class="slider-bounds"><span>50</span><span>1000</span></div>
+        </div>
+
+        <div class="slider-group">
+          <div class="flex justify-between mb-2">
+            <label class="slider-label">Build Time Target (minutes)</label>
+            <span class="slider-value" id="val-build-time">5 min</span>
+          </div>
+          <input type="range" id="slider-build-time" min="1" max="60" value="5" step="1" class="sim-slider" />
+          <div class="slider-bounds"><span>1 min</span><span>60 min</span></div>
+        </div>
+
+        <div class="slider-group">
+          <div class="flex justify-between mb-2">
+            <label class="slider-label">Focus Block Length (minutes)</label>
+            <span class="slider-value" id="val-focus">90 min</span>
+          </div>
+          <input type="range" id="slider-focus" min="30" max="180" value="90" step="15" class="sim-slider" />
+          <div class="slider-bounds"><span>30 min</span><span>180 min</span></div>
+        </div>
+      </div>
+
+      <!-- Result bar -->
+      <div id="sim-result-bar" class="mt-6 hidden">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div class="result-metric">
+            <div class="result-metric-label">Score Improvement</div>
+            <div class="result-metric-value text-[#00e5ff]" id="sim-score-delta">—</div>
+          </div>
+          <div class="result-metric">
+            <div class="result-metric-label">Improvement %</div>
+            <div class="result-metric-value text-[#a78bfa]" id="sim-improve-pct">—</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="result-metric">
+            <div class="result-metric-label">Hours Recovered / Week</div>
+            <div class="result-metric-value text-[#10b981]" id="sim-hours-recovered">—</div>
+          </div>
+          <div class="result-metric">
+            <div class="result-metric-label">Annual (10-dev team)</div>
+            <div class="result-metric-value text-[#a78bfa]" id="sim-annual-hours">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="mt-6 flex gap-3">
+        <button id="btn-run-simulation" class="btn-primary flex-1">
+          Run Simulation
+        </button>
+        <button id="btn-clear-sim" class="btn-outline flex-1">
+          Reset
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════ -->
+  <!-- JS MODULES (load order matters)    -->
+  <!-- ═══════════════════════════════════ -->
+  <script src="heatmap.js"></script>
+  <script src="shap_panel.js"></script>
+  <script src="simulator.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
