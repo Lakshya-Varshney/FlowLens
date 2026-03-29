@@ -293,10 +293,11 @@
       <!-- Data availability warning — shown by simulator.js when PR/CI data was not ingested -->
       <div id="data-warning" class="hidden mx-1 mb-2 px-4 py-3 rounded-sm text-[11px] leading-relaxed"
            style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;">
-        ⚠️ <strong>Some sliders have limited effect</strong> — PR and CI data was not available
-        during ingestion (blobless clone). Only focus block and gap-variance changes are active.
-        Set a <code style="background:#161822;padding:1px 5px;border-radius:2px;">GITHUB_TOKEN</code>
-        and re-run to unlock all sliders.
+        ⚠️ <strong>PR and CI data was not collected during ingestion.</strong>
+        The PR review time and build time sliders will have limited effect.
+        To unlock them, re-run ingestion — FlowLens will fetch PR data automatically
+        if <code style="background:#161822;padding:1px 5px;border-radius:2px;">GITHUB_TOKEN</code>
+        is present in the environment.
       </div>
 
       <!-- Sliders -->

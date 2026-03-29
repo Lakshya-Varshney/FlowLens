@@ -130,7 +130,7 @@ def run_ingestion(repo: str, since: str | None, ci_logs: str | None, cfg: dict, 
     Step 1 — ingest commits (and optional CI logs) into SQLite raw_commits table.
     """
     from flowlens.db import init_db, save_raw_commits, record_ingestion_run
-    from flowlens.ingest import ingest_repo, parse_ci_logs
+    from flowlens.ingest import ingest_repo, parse_ci_logs, fetch_pr_data, merge_pr_data_into_commits
 
     init_db()
 
@@ -152,6 +152,15 @@ def run_ingestion(repo: str, since: str | None, ci_logs: str | None, cfg: dict, 
             depth=depth,
         )
         logger.info("  ✓ %d commits extracted.", len(raw_df))
+
+        # ── PR enrichment via GitHub API ────────────────────────────────────
+        pr_df = fetch_pr_data(repo_source=repo, since_date=since_date)
+        raw_df = merge_pr_data_into_commits(raw_df, pr_df)
+        nonzero_pr = (raw_df["pr_blocking_time_hours"] > 0).sum()
+        logger.info(
+            "  ✓ PR enrichment done: %d commit rows have non-zero pr_blocking_time_hours.",
+            nonzero_pr,
+        )
 
         # Optional CI log ingestion for Cross-Track B
         ci_df = None

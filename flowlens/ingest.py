@@ -162,6 +162,194 @@ def parse_ci_logs(ci_logs_dir: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# GitHub PR enrichment
+# ---------------------------------------------------------------------------
+
+def fetch_pr_data(repo_source: str, since_date: datetime | None = None) -> pd.DataFrame:
+    """
+    Fetch merged PR data from the GitHub REST API and return a DataFrame
+    keyed by author_email with PR-level feature columns.
+
+    Columns returned:
+        author_email           — lowercase author login email (best-effort)
+        pr_date                — date the PR was merged (YYYY-MM-DD string)
+        pr_blocking_time_hours — hours from PR open → merge (review wait time)
+        pr_size_lines          — additions + deletions on the PR
+
+    Returns an empty DataFrame (with the above columns) if:
+        - GITHUB_TOKEN is missing from the environment
+        - repo_source is not a GitHub HTTPS URL
+        - The API call fails for any reason (errors are logged, never raised)
+
+    The caller (run_ingestion in run.py) is responsible for merging this
+    DataFrame into raw_df before feature engineering runs.
+    """
+    _PR_COLS = ["author_email", "pr_date", "pr_blocking_time_hours", "pr_size_lines"]
+    empty = pd.DataFrame(columns=_PR_COLS)
+
+    # ── 1. Token check ──────────────────────────────────────────────────────
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not token:
+        logger.warning(
+            "fetch_pr_data: GITHUB_TOKEN not set — skipping PR enrichment. "
+            "Set GITHUB_TOKEN in your .env file to enable PR features."
+        )
+        return empty
+
+    logger.info("fetch_pr_data: GITHUB_TOKEN detected (len=%d) ✓", len(token))
+
+    # ── 2. Parse owner/repo from URL ────────────────────────────────────────
+    if not (repo_source.startswith("http://") or repo_source.startswith("https://")):
+        logger.info("fetch_pr_data: local repo path — skipping PR enrichment.")
+        return empty
+
+    parts = repo_source.rstrip("/").replace(".git", "").split("/")
+    if len(parts) < 5 or "github.com" not in repo_source:
+        logger.warning(
+            "fetch_pr_data: could not parse owner/repo from URL '%s' — skipping.",
+            repo_source,
+        )
+        return empty
+
+    owner, repo_name = parts[-2], parts[-1]
+    logger.info("fetch_pr_data: fetching PRs for %s/%s …", owner, repo_name)
+
+    # ── 3. Call GitHub API (paginated) ──────────────────────────────────────
+    import urllib.request
+    import json
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    records: list[dict] = []
+    page = 1
+    per_page = 100
+    since_str = since_date.strftime("%Y-%m-%dT%H:%M:%SZ") if since_date else None
+
+    while True:
+        url = (
+            f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
+            f"?state=closed&per_page={per_page}&page={page}&sort=updated&direction=desc"
+        )
+
+        logger.info("fetch_pr_data: GET %s", url)
+
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                prs = json.loads(resp.read().decode())
+        except Exception as exc:
+            logger.warning(
+                "fetch_pr_data: GitHub API request failed (page=%d): %s — stopping pagination.",
+                page, exc,
+            )
+            break
+
+        if not prs:
+            break  # no more pages
+
+        stop_early = False
+        for pr in prs:
+            merged_at = pr.get("merged_at")
+            if not merged_at:
+                continue  # PR was closed but not merged
+
+            merged_dt = datetime.strptime(merged_at, "%Y-%m-%dT%H:%M:%SZ")
+
+            # Respect since_date — stop paginating once we hit older PRs
+            if since_date and merged_dt < since_date:
+                stop_early = True
+                break
+
+            created_at = pr.get("created_at", merged_at)
+            created_dt = datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ")
+            blocking_hours = (merged_dt - created_dt).total_seconds() / 3600
+
+            additions = pr.get("additions", 0) or 0
+            deletions = pr.get("deletions", 0) or 0
+
+            # GitHub gives login (username), not email — we use login@users.noreply.github.com
+            # as a best-effort key; the merge step in run.py joins on author_email.
+            user = pr.get("user") or {}
+            login = (user.get("login") or "unknown").lower()
+            email_key = f"{login}@users.noreply.github.com"
+
+            records.append({
+                "author_email": email_key,
+                "pr_date": merged_dt.strftime("%Y-%m-%d"),
+                "pr_blocking_time_hours": float(blocking_hours),
+                "pr_size_lines": float(additions + deletions),
+            })
+
+        if stop_early:
+            logger.info("fetch_pr_data: reached since_date threshold — stopping early.")
+            break
+
+        page += 1
+
+    if not records:
+        logger.warning(
+            "fetch_pr_data: no merged PRs found for %s/%s (since=%s).",
+            owner, repo_name, since_date,
+        )
+        return empty
+
+    pr_df = pd.DataFrame(records, columns=_PR_COLS)
+    logger.info(
+        "fetch_pr_data: ✓ fetched %d merged PRs for %s/%s. "
+        "pr_blocking_time_hours range: %.1f – %.1f hrs.",
+        len(pr_df), owner, repo_name,
+        pr_df["pr_blocking_time_hours"].min(),
+        pr_df["pr_blocking_time_hours"].max(),
+    )
+    return pr_df
+
+
+def merge_pr_data_into_commits(raw_df: pd.DataFrame, pr_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enrich raw_df with PR-level features by joining on (author_email, commit_date ≈ pr_date).
+
+    Strategy:
+        For each commit row, look up whether the same author had a PR merged
+        on the same calendar date and assign that PR's blocking_time_hours
+        and pr_size_lines to the commit row.
+
+        This is a best-effort approximation — a commit and its PR rarely
+        land on different days, but when they do the commit row gets 0.
+        Future improvement: join on PR branch name / commit SHA.
+
+    If pr_df is empty, returns raw_df unchanged.
+    """
+    if pr_df.empty:
+        logger.info("merge_pr_data_into_commits: pr_df is empty — no PR columns added.")
+        # Ensure columns exist with 0 defaults so feature engineering never fails
+        raw_df = raw_df.copy()
+        raw_df["pr_blocking_time_hours"] = 0.0
+        raw_df["pr_size_lines"] = 0.0
+        return raw_df
+
+    # Average per (author_email, pr_date) in case a dev merged multiple PRs in one day
+    pr_agg = pr_df.groupby(["author_email", "pr_date"]).agg(
+        pr_blocking_time_hours=("pr_blocking_time_hours", "mean"),
+        pr_size_lines=("pr_size_lines", "mean"),
+    ).reset_index().rename(columns={"pr_date": "commit_date"})
+
+    merged = raw_df.merge(pr_agg, on=["author_email", "commit_date"], how="left")
+    merged["pr_blocking_time_hours"] = merged["pr_blocking_time_hours"].fillna(0.0)
+    merged["pr_size_lines"] = merged["pr_size_lines"].fillna(0.0)
+
+    matched = (merged["pr_blocking_time_hours"] > 0).sum()
+    logger.info(
+        "merge_pr_data_into_commits: %d / %d commit rows matched with PR data.",
+        matched, len(merged),
+    )
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Repo opening
 # ---------------------------------------------------------------------------
 
