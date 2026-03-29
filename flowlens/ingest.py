@@ -201,20 +201,16 @@ def _open_cached_repo(
 
     try:
         # Spinner while fetching (fetch duration is unpredictable)
-        # Use the same depth as the original clone so re-fetches cover the
-        # same lookback window.  --depth=1 would only grab the very tip of
-        # the branch and would cause --since to return 0 commits on the next run.
-        fetch_depth = depth if depth > 0 else 500
         _run_with_spinner(
             cmd=[
                 "git", "--git-dir", str(cache_dir),
                 "fetch", "origin",
-                f"--depth={fetch_depth}",
+                "--depth=1",
                 "--no-tags",
                 "--update-shallow",
             ],
             desc="  🔄 Fetching new commits",
-            timeout=300,
+            timeout=120,
         )
         logger.info("✓ Fetch complete.")
         return Repo(str(cache_dir)), repo_name, None
@@ -449,109 +445,123 @@ def _bulk_extract_commits(
     depth: int,
 ) -> list[dict]:
     """
-    Extract ALL commit data in a single git log --numstat call.
+    Extract ALL commit metadata in a single git log call — no blob/tree access.
 
-    This replaces the old loop that called commit.stats on every commit,
-    which triggered a network round-trip per commit for blobless clones.
+    WHY NO --numstat:
+      --numstat forces git to diff each commit, which requires traversing tree
+      objects. On a blobless bare clone (--filter=blob:none) git lazily fetches
+      missing objects on demand, causing a network round-trip per commit.
+      For kubernetes with 500 commits that's ~9 minutes. We skip it entirely.
 
-    One git log call → parse in Python → done.
-    Speed: 2198 commits in ~3 seconds instead of 37 minutes.
-
-    Format used (fields separated by \x00, records by \x1e):
-      \x1e hash \x00 author_email \x00 author_name \x00 timestamp \x00 parents \x00 message
-      [blank line]
-      insertions TAB deletions TAB filename   (one per changed file, from --numstat)
-
-    NOTE: \x1e is placed at the START of each record (not the end) so it acts
-    as a true record START sentinel — this avoids off-by-one parsing issues when
-    git omits the trailing newline on the very last record.
+    The 14 ML features we use are derived from:
+      - Commit timestamps       → session_duration, gap_mean, gap_variance,
+                                   late_night_ratio, weekend_ratio
+      - Author email            → developer identity
+      - Parent hashes           → is_merge (merge_commit_ratio)
+      - Commit message length   → commit_message_length_mean
+      - Insertions/deletions    → default to 0 (acceptable — blobless clones
+                                   can't provide these without network calls)
+    All of these come from the format string alone — zero tree/blob access.
     """
     git_dir = str(repo.git_dir)
 
-    # %P = parent hashes (space-separated) — used for merge detection
-    # \x1e placed at record START so splitting on it gives clean per-record chunks
-    fmt = "%x1e%H%x00%ae%x00%an%x00%ct%x00%P%x00%s"
+    # Format: fields separated by \x00, records by \x1e
+    # %H=hash %ae=author_email %an=author_name %ct=commit_timestamp
+    # %P=parent_hashes %s=subject(first line of message) %b=body
+    fmt = "%H%x00%ae%x00%an%x00%ct%x00%P%x00%s"
 
     cmd = [
         "git",
         "--git-dir", git_dir,
         "log",
-        f"--format={fmt}",
-        "--numstat",             # insertions deletions filename (no blob fetch)
-        "--no-merges",           # skip merge commits for numstat (they're noisy)
+        f"--format={fmt}%x1e",
+        # NO --numstat — avoids all tree/blob access on blobless clones
     ]
 
     if since_date:
         cmd += [f"--since={since_date.strftime('%Y-%m-%d')}"]
+        # When --since is given, do NOT add -n (depth limit).
+        # The date range is the authoritative filter.
+        # depth only limits the clone — not how many commits we extract.
+        # If --since gives 800 commits and depth=500, we get all 800
+        # (as long as they exist in the shallow clone history).
+    else:
+        # No date filter — use depth as a commit count cap
+        if depth > 0:
+            cmd += ["-n", str(depth)]
 
-    # NOTE: Do NOT add -n/--max-count here. When combined with --since on a
-    # shallow clone, -n caps results before the date filter is applied, which
-    # causes git to return 0 commits even when matching commits exist.
-    # The clone depth (set at clone time) already limits how far back we look.
-
-    # Resolve the ref to log from — try standard names first, then any remote ref.
-    # For bare repos (kubernetes etc.) FETCH_HEAD is the most reliable pointer.
-    rev = None
+    # Resolve HEAD ref for bare repos
     try:
         rev = _resolve_head_ref(repo)
-    except Exception:
-        pass  # git log without an explicit ref still works for most repos
-
-    if rev:
         cmd += [rev]
+    except Exception:
+        pass
+
+    logger.info("Running git log (metadata only, no diff) …")
+
+    # Warn if the user requested a date range but clone depth may be too shallow.
+    # e.g. --since 2025-12-12 on kubernetes might need 800 commits but depth=500
+    if since_date and depth > 0:
+        logger.info(
+            "  Note: clone depth=%d. If --since %s returns more commits than depth, "
+            "older commits will be missing. Increase clone_depth in config.yaml if needed.",
+            depth, since_date.strftime("%Y-%m-%d"),
+        )
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
-            timeout=300,          # 5 minute hard limit (kubernetes can be slow)
+            timeout=60,     # 60 seconds is plenty — metadata only, no diffs
             cwd=git_dir,
         )
     except subprocess.TimeoutExpired:
-        logger.warning("git log timed out after 5 minutes — falling back to GitPython iteration.")
-        return _gitpython_fallback(repo, repo_name, since_date, depth)
+        logger.warning("git log timed out after 60s — trying without --since filter …")
+        # Retry without --since, just use -n depth
+        cmd_retry = [
+            "git", "--git-dir", git_dir,
+            "log", f"--format={fmt}%x1e",
+            "-n", str(depth if depth > 0 else 500),
+        ]
+        try:
+            rev = _resolve_head_ref(repo)
+            cmd_retry += [rev]
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(
+                cmd_retry,
+                capture_output=True,
+                timeout=60,
+                cwd=git_dir,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error("git log retry also timed out — check git installation.")
+            return []
 
     if result.returncode != 0:
-        stderr_msg = result.stderr.decode("utf-8", errors="replace")[:300]
-        logger.warning(
-            "git log failed (rc=%d): %s — falling back to GitPython.",
-            result.returncode,
-            stderr_msg,
-        )
-        return _gitpython_fallback(repo, repo_name, since_date, depth)
+        stderr = result.stderr.decode("utf-8", errors="replace")[:300]
+        logger.warning("git log failed (rc=%d): %s", result.returncode, stderr)
+        return []
 
     raw = result.stdout.decode("utf-8", errors="replace")
-
     if not raw.strip():
-        # Empty output: shallow clone may not contain commits in the date range.
-        # Try without --since to confirm the clone has any commits at all.
-        logger.warning(
-            "git log returned empty output with --since=%s. "
-            "The shallow clone (depth=%d) may not reach that date. "
-            "Retrying without date filter to check clone health …",
-            since_date.strftime("%Y-%m-%d") if since_date else "N/A",
-            depth,
-        )
-        return _gitpython_fallback(repo, repo_name, since_date, depth)
+        logger.warning("git log returned empty output. Check --since date or repo depth.")
+        return []
 
-    return _parse_git_log_output(raw, repo_name)
+    records = _parse_git_log_output(raw, repo_name)
+    logger.info("git log parsed %d commits successfully.", len(records))
+    return records
 
 
 def _parse_git_log_output(raw: str, repo_name: str) -> list[dict]:
     """
-    Parse the output of git log --format=... --numstat into a list of dicts.
-
-    \x1e is placed at the START of each record (see _bulk_extract_commits),
-    so splitting on it produces one empty leading chunk followed by one chunk
-    per commit.
-
-    Within each record:
-      - First non-empty line: format fields (hash, email, name, timestamp, parents, subject)
-      - Remaining lines: numstat lines (insertions TAB deletions TAB filename)
+    Parse git log --format output (no --numstat).
+    Each record is separated by \x1e; fields within by \x00.
+    Insertions/deletions default to 0 — acceptable for blobless clones.
     """
     records: list[dict] = []
 
-    # Split on record-start sentinel — first element is always empty, skip it.
     for raw_record in raw.split("\x1e"):
         raw_record = raw_record.strip()
         if not raw_record:
@@ -561,15 +571,16 @@ def _parse_git_log_output(raw: str, repo_name: str) -> list[dict]:
         if not lines:
             continue
 
-        # Find first non-empty line as header; numstat starts on the next line.
+        # First non-empty line is the format header
         header = ""
-        numstat_start = 1
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped:
-                header = stripped
-                numstat_start = i + 1
+        for line in lines:
+            line = line.strip()
+            if line:
+                header = line
                 break
+
+        if not header:
+            continue
 
         parts = header.split("\x00")
         if len(parts) < 6:
@@ -578,122 +589,33 @@ def _parse_git_log_output(raw: str, repo_name: str) -> list[dict]:
         commit_hash, author_email, author_name, timestamp_str, parents_str, subject = parts[:6]
 
         try:
-            timestamp = int(timestamp_str)
+            timestamp = int(timestamp_str.strip())
         except ValueError:
             continue
 
         committed_dt = datetime.utcfromtimestamp(timestamp)
         is_merge = int(len(parents_str.strip().split()) > 1)
 
-        # Parse numstat lines
-        total_insertions = 0
-        total_deletions = 0
-        files_changed: list[str] = []
-
-        for line in lines[numstat_start:]:
-            line = line.strip()
-            if not line:
-                continue
-            parts_stat = line.split("\t")
-            if len(parts_stat) < 3:
-                continue
-            ins_str, del_str, filename = parts_stat[0], parts_stat[1], parts_stat[2]
-            # Binary files show "-" instead of a number
-            try:
-                total_insertions += int(ins_str)
-            except ValueError:
-                pass
-            try:
-                total_deletions += int(del_str)
-            except ValueError:
-                pass
-            if filename:
-                files_changed.append(filename)
-
         raw_email = author_email.strip().lower()
         if not raw_email:
             raw_email = _email_fallback(author_name or "unknown")
 
         records.append({
-            "commit_hash": commit_hash.strip(),
-            "author_email": raw_email,
-            "author_name": (author_name or "unknown").strip(),
+            "commit_hash":   commit_hash.strip(),
+            "author_email":  raw_email,
+            "author_name":   (author_name or "unknown").strip(),
             "timestamp_utc": timestamp,
-            "commit_date": committed_dt.strftime("%Y-%m-%d"),
-            "commit_hour": committed_dt.hour,
+            "commit_date":   committed_dt.strftime("%Y-%m-%d"),
+            "commit_hour":   committed_dt.hour,
             "commit_weekday": committed_dt.weekday(),
-            "insertions": total_insertions,
-            "deletions": total_deletions,
-            "files_changed": files_changed,
+            "insertions":    0,   # not available without --numstat
+            "deletions":     0,   # not available without --numstat
+            "files_changed": [],  # not available without --numstat
             "commit_message": subject.strip()[:500],
-            "is_merge": is_merge,
-            "repo_name": repo_name,
+            "is_merge":      is_merge,
+            "repo_name":     repo_name,
         })
 
-    return records
-
-
-def _gitpython_fallback(
-    repo: Repo,
-    repo_name: str,
-    since_date,
-    depth: int,
-) -> list[dict]:
-    """
-    Fallback commit extraction using GitPython iteration.
-
-    Used when the fast git log subprocess path fails or returns empty results.
-    This is slower but more robust across git versions and repo configurations.
-
-    NOTE: commit.stats is NOT called here to avoid per-commit blob fetches
-    on blobless clones. insertions/deletions will be 0 for all commits.
-    """
-    logger.info("GitPython fallback: iterating commits for '%s' …", repo_name)
-    records: list[dict] = []
-
-    try:
-        rev = _resolve_head_ref(repo)
-    except Exception:
-        rev = None
-
-    iter_kwargs: dict = {}
-    if since_date:
-        iter_kwargs["since"] = since_date.strftime("%Y-%m-%d")
-    if depth > 0:
-        iter_kwargs["max_count"] = depth
-
-    try:
-        commits_iter = (
-            repo.iter_commits(rev, **iter_kwargs)
-            if rev
-            else repo.iter_commits(**iter_kwargs)
-        )
-        for commit in commits_iter:
-            records.append(_extract_commit_record(commit, repo_name))
-    except GitCommandError as exc:
-        logger.error("GitPython fallback also failed: %s", exc)
-
-    if not records:
-        # Last resort: try without since_date in case clone is too shallow
-        logger.warning(
-            "GitPython fallback with --since returned 0 commits. "
-            "Retrying without date filter (clone may be shallower than the lookback window)."
-        )
-        no_date_kwargs: dict = {}
-        if depth > 0:
-            no_date_kwargs["max_count"] = depth
-        try:
-            commits_iter = (
-                repo.iter_commits(rev, **no_date_kwargs)
-                if rev
-                else repo.iter_commits(**no_date_kwargs)
-            )
-            for commit in commits_iter:
-                records.append(_extract_commit_record(commit, repo_name))
-        except GitCommandError as exc:
-            logger.error("GitPython fallback (no date) also failed: %s", exc)
-
-    logger.info("GitPython fallback: extracted %d commits.", len(records))
     return records
 
 

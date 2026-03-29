@@ -32,6 +32,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv()  # Read .env file if present
+
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
@@ -107,9 +108,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--depth",
         type=int,
-        default=500,
-        help="Shallow clone depth — number of recent commits to fetch (default: 500). "
-             "Use 0 for full history (slow for large repos).",
+        default=None,   # None means: read from config.yaml clone_depth
+        help="Shallow clone depth — number of recent commits to fetch. "
+             "Overrides config.yaml clone_depth. Use 0 for full history. "
+             "Default: value from config.yaml (500).",
     )
     parser.add_argument(
         "--no-browser",
@@ -295,7 +297,9 @@ def main() -> None:
     if args.demo:
         load_demo_data(cfg)
     else:
-        run_ingestion(args.repo, args.since, args.ci_logs, cfg, args.depth)
+        # Resolve depth: CLI flag overrides config.yaml, config overrides hardcoded default
+        depth = args.depth if args.depth is not None else cfg.get("ingestion", {}).get("clone_depth", 500)
+        run_ingestion(args.repo, args.since, args.ci_logs, cfg, depth)
 
     X_scaled, X_raw, meta_df, feature_scaler = run_feature_engineering(cfg)
     run_model_training(X_scaled, X_raw, meta_df, cfg, feature_scaler)

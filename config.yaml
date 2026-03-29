@@ -16,6 +16,7 @@ scoring:
 ingestion:
   default_days_lookback: 90
   batch_size: 5000           # Commits per GitPython batch
+  clone_depth: 500 
 
 llm:
   model: "gemini-2.5-flash"
