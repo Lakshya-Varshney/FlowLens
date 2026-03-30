@@ -99,7 +99,7 @@ def _generate_synthetic_commits(
                     # Late night bias during crunch
                     hour = int(rng.choice(
                         list(range(8, 24)) + list(range(0, 4)),
-                        p=[0.04] * 16 + [0.06] * 4,
+                        p=[1/24] * 16 + [2/24] * 4,
                     ))
                 else:
                     hour = int(rng.integers(9, 19))
