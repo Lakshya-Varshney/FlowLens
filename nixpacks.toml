@@ -1,2 +1,5 @@
 [phases.setup]
-nixPkgs = ["git", "python311"]
+nixPkgs = ["git", "python311", "gcc", "binutils"]
+
+[start]
+cmd = "python run.py --demo --no-browser --port $PORT"
