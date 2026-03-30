@@ -1,1 +1,1 @@
-echo "web: bash start.sh" > Procfile
+web: bash start.sh
