@@ -292,11 +292,18 @@ FEATURE_COLS = [
 
 def save_features(meta_df: pd.DataFrame) -> None:
     """
-    Upsert developer-day features into developer_day_features table.
+    Replace ALL developer_day_features with the new batch.
+    Clears the entire table first so stale demo/old-repo rows never
+    bleed into a new ingestion run.
     meta_df must include metadata columns + all FEATURE_COLS.
     """
     if meta_df.empty:
         return
+
+    with get_connection() as conn:
+        deleted = conn.execute("DELETE FROM developer_day_features").rowcount
+        if deleted:
+            logger.info("Cleared %d stale feature rows before saving new batch.", deleted)
 
     def _safe(val: Any) -> Any:
         """Convert NaN/Inf to None for SQLite."""
